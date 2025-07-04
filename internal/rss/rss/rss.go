@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
+func FetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	// This function would typically fetch the RSS feed from the given URL.
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)

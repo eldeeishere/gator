@@ -44,8 +44,9 @@ func main() {
 	commands.Register("register", commandss.HandlerRegister)
 	commands.Register("reset", commandss.HandlerReset)
 	commands.Register("users", commandss.HandlerUsers)
-	commands.Register("agg", commandss.HandlerUsers)
-
+	commands.Register("agg", commandss.HandlerAgg)
+	commands.Register("addfeed", commandss.HandlerAddFeed)
+	commands.Register("feeds", commandss.HandlerFeeds)
 	cmd := commandss.Command{
 		Name: args[1],
 		Args: args[2:],
