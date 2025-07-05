@@ -2,6 +2,7 @@ package commandss
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -87,37 +88,109 @@ func HandlerRegister(s *State, cmd Command) error {
 }
 
 func HandlerAgg(s *State, cmd Command) error {
-	ctx := context.Background()
-	content, err := rss.FetchFeed(ctx, "https://www.wagslane.dev/index.xml")
+	if len(cmd.Args) < 1 {
+		return fmt.Errorf("timout between fetches is required, eg: 5s, 2m, 1h")
+	}
+	timeout, err := time.ParseDuration(cmd.Args[0])
 	if err != nil {
-		return fmt.Errorf("error fetching RSS feed: %w", err)
+		return fmt.Errorf("invalid duration format: %w", err)
 	}
-	if len(content.Channel.Items) == 0 {
-		fmt.Println("No items found in the RSS feed.")
+	ticker := time.NewTicker(timeout)
+	for ; ; <-ticker.C {
+		fmt.Printf("Collecting feeds every %s\n", timeout)
+		scrapeFeed(s)
 	}
-	fmt.Printf("Feed: %+v\n", content)
-	return nil
 }
 
-func HandlerAddFeed(s *State, cmd Command) error {
+func HandlerFollow(s *State, cmd Command, user database.User) error {
+	if len(cmd.Args) == 0 {
+		return fmt.Errorf("feed URL are required")
+	}
+	ctx := context.Background()
+
+	feed, err := s.Db.GetFeedsUrl(ctx, cmd.Args[0])
+	if err != nil {
+		return fmt.Errorf("error retrieving feed by URL: %w", err)
+	}
+	if _, err := s.Db.CreateFeedFollow(ctx, database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	}); err != nil {
+		return fmt.Errorf("error adding feed follow: %w", err)
+	}
+	fmt.Printf("Successfully followed feed: %s\n", feed.Name)
+
+	return nil
+
+}
+
+func HandlerFollowing(s *State, cmd Command, user database.User) error {
+	if len(cmd.Args) > 0 {
+		return fmt.Errorf("no arguments expected for following command")
+	}
+	ctx := context.Background()
+
+	following, err := s.Db.GetFeedFollowsForUser(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("error retrieving followed feeds: %w", err)
+	}
+	if len(following) == 0 {
+		fmt.Println("You are not following any feeds.")
+	}
+	for _, follow := range following {
+		fmt.Printf("%s\n", follow.FeedName)
+	}
+	return nil
+
+}
+
+func HandlerAddFeed(s *State, cmd Command, user database.User) error {
 	if len(cmd.Args) <= 1 {
 		return fmt.Errorf("feed URL and name are required")
 	}
-	userID, err := s.getCurrentUserUUID()
-	if err != nil {
-		return fmt.Errorf("error retrieving current user UUID: %w", err)
-	}
+
 	if feed, err := s.Db.AddFeed(context.Background(), database.AddFeedParams{
 		ID:        uuid.New(),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Name:      cmd.Args[0],
 		Url:       cmd.Args[1],
-		UserID:    userID,
+		UserID:    user.ID,
 	}); err != nil {
 		return fmt.Errorf("error adding feed: %w", err)
 	} else {
 		fmt.Printf("%+v\n", feed)
+	}
+	if err := HandlerFollow(s, Command{
+		Name: "follow",
+		Args: []string{cmd.Args[1]},
+	}, user); err != nil {
+		return fmt.Errorf("error following feed after adding: %w", err)
+	}
+	fmt.Printf("Feed %s added and followed successfully.\n", cmd.Args[0])
+
+	return nil
+}
+
+func HandlerUnfollow(s *State, cmd Command, user database.User) error {
+	if len(cmd.Args) < 1 {
+		return fmt.Errorf("feed URL")
+	}
+	data, err := s.Db.GetFeedsUrl(context.Background(), cmd.Args[0])
+	if err != nil {
+		return fmt.Errorf("error retrieving feed by URL: %w", err)
+	}
+	if len(cmd.Args) > 1 {
+		return fmt.Errorf("only one feed ID is expected")
+	}
+	if err := s.Db.UnfollowFeed(context.Background(), database.UnfollowFeedParams{
+		UserID: user.ID,
+		FeedID: data.ID,
+	}); err != nil {
+		return fmt.Errorf("error unfollowing feed: %w", err)
 	}
 
 	return nil
@@ -163,14 +236,44 @@ func (c *Commands) Register(name string, handler func(*State, Command) error) {
 	c.Commands[name] = handler
 }
 
-func (s *State) getCurrentUserUUID() (uuid.UUID, error) {
-	if s.ConfigFile.CURRENT_USER == "" {
-		return uuid.Nil, fmt.Errorf("no current user set in config")
-	}
-	data, err := s.Db.GetUser(context.Background(), s.ConfigFile.CURRENT_USER)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("error retrieving current user: %w", err)
-	}
-	return data.ID, nil
+func MiddlewareLoggedIn(handler func(s *State, cmd Command, user database.User) error) func(s *State, cmd Command) error {
+	return func(s *State, cmd Command) error {
+		data, err := s.Db.GetUser(context.Background(), s.ConfigFile.CURRENT_USER)
+		if err != nil {
+			return fmt.Errorf("error retrieving current user: %w", err)
+		}
+		result := handler(s, cmd, data)
+		if result != nil {
+			return fmt.Errorf("error in handler: %w", result)
+		}
+		return nil
 
+	}
+
+}
+
+func scrapeFeed(s *State) error {
+	ctx := context.Background()
+	feed, err := s.Db.GetNextFeedToFetch(ctx)
+	if err != nil {
+		return fmt.Errorf("error retrieving next feed to fetch: %w", err)
+	}
+	for _, f := range feed {
+		s.Db.MarkFeedFetched(ctx, database.MarkFeedFetchedParams{
+			LastFetechAt: sql.NullTime{
+				Time:  time.Now(),
+				Valid: true,
+			},
+			UpdatedAt: time.Now(),
+			ID:        f.ID,
+		})
+		rss_feed, err := rss.FetchFeed(ctx, f.Url)
+		if err != nil {
+			return fmt.Errorf("error fetching feed: %w", err)
+		}
+		for _, item := range rss_feed.Channel.Items {
+			fmt.Printf("%s\n", item.Title)
+		}
+	}
+	return nil
 }

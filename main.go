@@ -45,8 +45,11 @@ func main() {
 	commands.Register("reset", commandss.HandlerReset)
 	commands.Register("users", commandss.HandlerUsers)
 	commands.Register("agg", commandss.HandlerAgg)
-	commands.Register("addfeed", commandss.HandlerAddFeed)
+	commands.Register("addfeed", commandss.MiddlewareLoggedIn(commandss.HandlerAddFeed))
 	commands.Register("feeds", commandss.HandlerFeeds)
+	commands.Register("unfollow", commandss.MiddlewareLoggedIn(commandss.HandlerUnfollow))
+	commands.Register("follow", commandss.MiddlewareLoggedIn(commandss.HandlerFollow))
+	commands.Register("following", commandss.MiddlewareLoggedIn(commandss.HandlerFollowing))
 	cmd := commandss.Command{
 		Name: args[1],
 		Args: args[2:],
