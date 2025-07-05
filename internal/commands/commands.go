@@ -71,7 +71,6 @@ func HandlerRegister(s *State, cmd Command) error {
 	ctx := context.Background()
 	arg := database.CreateUserParams{
 		ID:        uuid.New(),
-		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Name:      cmd.Args[0],
 	}
@@ -114,7 +113,6 @@ func HandlerFollow(s *State, cmd Command, user database.User) error {
 	}
 	if _, err := s.Db.CreateFeedFollow(ctx, database.CreateFeedFollowParams{
 		ID:        uuid.New(),
-		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		UserID:    user.ID,
 		FeedID:    feed.ID,
@@ -154,7 +152,6 @@ func HandlerAddFeed(s *State, cmd Command, user database.User) error {
 
 	if feed, err := s.Db.AddFeed(context.Background(), database.AddFeedParams{
 		ID:        uuid.New(),
-		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Name:      cmd.Args[0],
 		Url:       cmd.Args[1],
@@ -272,7 +269,18 @@ func scrapeFeed(s *State) error {
 			return fmt.Errorf("error fetching feed: %w", err)
 		}
 		for _, item := range rss_feed.Channel.Items {
-			fmt.Printf("%s\n", item.Title)
+			s.Db.CreatePost(ctx, database.CreatePostParams{
+				ID:        uuid.New(),
+				UpdatedAt: time.Now(),
+				Title:     item.Title,
+				Url:       item.Link,
+				FeedID:    f.ID,
+				Description: sql.NullString{
+					String: item.Description,
+					Valid:  true,
+				},
+				PublishedAt: PubDate(item.PubDate),
+			})
 		}
 	}
 	return nil

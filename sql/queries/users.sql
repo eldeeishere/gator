@@ -1,25 +1,43 @@
 -- name: CreateUser :one
-INSERT INTO users (id, created_at, updated_at, name)
+INSERT INTO users (id, updated_at, name)
 VALUES (
     $1,
     $2,
-    $3,
-    $4
+    $3
 )
 RETURNING *;
 
 -- name: AddFeed :one
-INSERT INTO feeds (id, created_at, updated_at, name, url, user_id)
+INSERT INTO feeds (id, updated_at, name, url, user_id)
+VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5
+)
+RETURNING *;
+
+-- name: CreatePost :one
+INSERT INTO posts (id, updated_at, title, url, description, published_at, feed_id)
 VALUES (
     $1,
     $2,
     $3,
     $4,
     $5,
-    $6
+    $6,
+    $7
 )
 RETURNING *;
 
+-- name: GetPostsForUsers :many
+SELECT p.*
+FROM posts p
+INNER JOIN feed_follows ff ON p.feed_id = ff.feed_id
+WHERE ff.user_id = $1
+ORDER BY p.published_at
+LIMIT $2;
 
 -- name: GetFeeds :many
 SELECT f.name, f.url, u.name from feeds f 
@@ -27,8 +45,8 @@ INNER JOIN users u ON f.user_id = u.id;
 
 -- name: CreateFeedFollow :one
 WITH inserted_feed_follow AS (
-    INSERT INTO feed_follows (id, created_at, updated_at, user_id, feed_id)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO feed_follows (id, updated_at, user_id, feed_id)
+    VALUES ($1, $2, $3, $4)
     RETURNING *
 )
 SELECT 
