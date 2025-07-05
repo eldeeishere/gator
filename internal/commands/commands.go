@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/eldeeishere/gator/internal/config"
@@ -193,6 +195,44 @@ func HandlerUnfollow(s *State, cmd Command, user database.User) error {
 	return nil
 }
 
+func HandlerBrowse(s *State, cmd Command, user database.User) error {
+	limit := int32(2) // Default limit
+
+	// If arguments are provided, expect "limit" as first arg and number as second
+	if len(cmd.Args) > 0 {
+		if cmd.Args[0] != "limit" {
+			return fmt.Errorf("invalid argument %s, only 'limit' is supported", cmd.Args[0])
+		}
+
+		if len(cmd.Args) < 2 {
+			return fmt.Errorf("limit value is required after 'limit'")
+		}
+
+		parsedLimit, err := strconv.ParseInt(cmd.Args[1], 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid limit value: %w", err)
+		}
+		limit = int32(parsedLimit)
+	}
+	post, err := s.Db.GetPostsForUsers(context.Background(), database.GetPostsForUsersParams{
+		UserID: user.ID,
+		Limit:  limit,
+	})
+	if err != nil {
+		return fmt.Errorf("error retrieving posts: %w", err)
+	}
+	if len(post) == 0 {
+		fmt.Println("No posts found.")
+	}
+	for _, p := range post {
+		fmt.Printf("Title: %s\nURL: %s\nPublished At: %s\nDescription: %s\n\n",
+			p.Title, p.Url, p.PublishedAt.Format(time.RFC1123),
+			p.Description.String)
+	}
+
+	return nil
+}
+
 func HandlerFeeds(s *State, cmd Command) error {
 
 	feed, err := s.Db.GetFeeds(context.Background())
@@ -269,7 +309,7 @@ func scrapeFeed(s *State) error {
 			return fmt.Errorf("error fetching feed: %w", err)
 		}
 		for _, item := range rss_feed.Channel.Items {
-			s.Db.CreatePost(ctx, database.CreatePostParams{
+			_, err := s.Db.CreatePost(ctx, database.CreatePostParams{
 				ID:        uuid.New(),
 				UpdatedAt: time.Now(),
 				Title:     item.Title,
@@ -279,9 +319,28 @@ func scrapeFeed(s *State) error {
 					String: item.Description,
 					Valid:  true,
 				},
-				PublishedAt: PubDate(item.PubDate),
+				PublishedAt: pubDate(item.PubDate),
 			})
+			if err != nil && !isDuplicateError(err) {
+				return fmt.Errorf("error creating post: %w", err)
+			}
 		}
+
 	}
 	return nil
+}
+
+func isDuplicateError(err error) bool {
+	// PostgreSQL duplicate key error contains "duplicate key value violates unique constraint"
+	return strings.Contains(err.Error(), "duplicate key value violates unique constraint") ||
+		strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+func pubDate(pubDate string) time.Time {
+	t, err := time.Parse(time.RFC1123Z, pubDate)
+	if err != nil {
+		fmt.Printf("Error parsing pubDate %s: %v\n", pubDate, err)
+		return time.Now()
+	}
+	return t
 }

@@ -50,6 +50,7 @@ func main() {
 	commands.Register("unfollow", commandss.MiddlewareLoggedIn(commandss.HandlerUnfollow))
 	commands.Register("follow", commandss.MiddlewareLoggedIn(commandss.HandlerFollow))
 	commands.Register("following", commandss.MiddlewareLoggedIn(commandss.HandlerFollowing))
+	commands.Register("browse", commandss.MiddlewareLoggedIn(commandss.HandlerBrowse))
 	cmd := commandss.Command{
 		Name: args[1],
 		Args: args[2:],
